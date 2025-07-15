@@ -1,64 +1,63 @@
 package com.gateopenerz.paperserver
 
 import com.google.gson.Gson
+import org.gradle.api.GradleException
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.JavaExec
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.kotlin.dsl.register
 import java.io.File
 import java.net.URI
-import kotlin.collections.get
+import javax.inject.Inject
 
 @Suppress("unused")
-class PaperServerPlugin : Plugin<Project> {
+abstract class PaperServerPlugin @Inject constructor(
+    private val toolchains: JavaToolchainService
+) : Plugin<Project> {
+
     override fun apply(project: Project) {
         with(project) {
 
-            val ext = extensions.create(
-                "paperServer",
-                PaperServerExtension::class.java
-            ).apply {
+            val ext = extensions.create("paperServer", PaperServerExtension::class.java).apply {
                 version.convention("1.21.7")
                 jvmArgs.convention("-Xms1G -Xmx2G")
                 serverDir.convention("development-server")
+                preLaunchTasks.convention(emptyList())
             }
 
             val setup = tasks.register("setupPaperServer") {
                 group = "paper"
-                description = "Download latest Paper build & accept EULA"
-                outputs.upToDateWhen { false }
+                description = "Download latest Paper build and accept EULA"
 
                 doLast {
-                    val ver     = ext.version.get()
-                    val baseDir = layout.projectDirectory.dir(ext.serverDir.get()).asFile
-                    val jarName = "paper-$ver.jar"
-                    val jarFile = File(baseDir, jarName)
-                    baseDir.mkdirs()
+                    val version     = ext.version.get()
+                    val serverDir   = layout.projectDirectory.dir(ext.serverDir.get()).asFile
+                    val latestBuild = fetchLatestBuild(version)
+                    val jarName     = "paper-$version-$latestBuild.jar"
+                    val jarFile     = File(serverDir, jarName)
 
-                    fun latestBuild(v: String): Int =
-                        URI.create("https://api.papermc.io/v2/projects/paper/versions/$v/")
-                            .toURL()
-                            .openStream().bufferedReader().use {
-                                val js = Gson().fromJson(it, Map::class.java)
-                                @Suppress("UNCHECKED_CAST")
-                                (js["builds"] as List<Double>).last().toInt()
-                            }
-
-                    val build = latestBuild(ver)
-                    val tmp   = File(baseDir, "paper-$ver-$build.jar")
+                    serverDir.mkdirs()
 
                     if (!jarFile.exists()) {
+                        serverDir.listFiles { f ->
+                            f.name.startsWith("paper-") && f.name.endsWith(".jar")
+                        }?.forEach(File::delete)
+
                         val url =
-                            "https://api.papermc.io/v2/projects/paper/versions/$ver/" +
-                                    "builds/$build/downloads/${tmp.name}"
-                        println("Downloading Paper $ver build $build …")
-                        URI(url).toURL().openStream().use { it.copyTo(tmp.outputStream()) }
-                        tmp.renameTo(jarFile)
+                            "https://api.papermc.io/v2/projects/paper/versions/$version/" +
+                                    "builds/$latestBuild/downloads/$jarName"
+                        println("Downloading Paper $version build $latestBuild …")
+                        URI(url).toURL().openStream().use { i ->
+                            jarFile.outputStream().use { o -> i.copyTo(o) }
+                        }
+                        println("Saved → ${jarFile.relativeTo(project.projectDir)}")
                     } else {
-                        println("$jarName already exists – skipping download.")
+                        println("Paper $version build $latestBuild already present.")
                     }
 
-                    val eula = File(baseDir, "eula.txt")
+                    val eula = File(serverDir, "eula.txt")
                     if (!eula.exists() || !eula.readText().contains("eula=true")) {
                         eula.writeText("eula=true")
                         println("EULA accepted.")
@@ -66,30 +65,45 @@ class PaperServerPlugin : Plugin<Project> {
                 }
             }
 
-            tasks.register<JavaExec>("runPaperServer") {
+            val runServer = tasks.register<JavaExec>("runPaperServer") {
                 group = "paper"
                 description = "Start Paper with configured JVM args"
                 dependsOn(setup)
-
-                val baseDir = layout.projectDirectory.dir(ext.serverDir.get()).asFile
-                val jarName = "paper-${ext.version.get()}.jar"
-                val jarFile = File(baseDir, jarName)
-
-                workingDir = baseDir
-                mainClass.set("-jar")
-                setClasspath(files(jarFile))
-                args(jarName, "--nogui")
-
-                ext.jvmArgs.orNull
-                    ?.trim()
-                    ?.takeIf { it.isNotEmpty() }
-                    ?.split("\\s+".toRegex())
-                    ?.let { jvmArgs(it) }
-
+                javaLauncher.set(toolchains.launcherFor {
+                    languageVersion.set(JavaLanguageVersion.of(21))
+                })
                 doFirst {
-                    logger.lifecycle(">>> Launching Paper server with JVM args: ${ext.jvmArgs.get()}")
+                    val serverDir = layout.projectDirectory.dir(ext.serverDir.get()).asFile
+                    val version   = ext.version.get()
+                    val jar = serverDir.listFiles { f ->
+                        f.isFile && f.name.startsWith("paper-$version-") && f.name.endsWith(".jar")
+                    }?.singleOrNull() ?: throw GradleException(
+                        "Paper jar for $version not found in $serverDir – run :setupPaperServer."
+                    )
+
+                    val flags = ext.jvmArgs.get().split("\\s+".toRegex()).filter(String::isNotBlank)
+                    jvmArgs(flags)
+                    workingDir = serverDir
+                    mainClass.set("-jar")
+                    classpath = files()
+                    args(jar.absolutePath, "--nogui")
+                    logger.lifecycle(">>> Launching Paper with JVM args: ${flags.joinToString(" ")}")
+                    logger.lifecycle(">>> Using jar: ${jar.name}")
+                }
+            }
+            afterEvaluate {
+                ext.preLaunchTasks.get().forEach { taskName ->
+                    runServer.configure { dependsOn(taskName) }
                 }
             }
         }
     }
+
+    private fun fetchLatestBuild(v: String): Int =
+        URI("https://api.papermc.io/v2/projects/paper/versions/$v/")
+            .toURL().openStream().bufferedReader().use {
+                val json = Gson().fromJson(it, Map::class.java)
+                @Suppress("UNCHECKED_CAST")
+                (json["builds"] as List<Double>).last().toInt()
+            }
 }

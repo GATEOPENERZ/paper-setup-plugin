@@ -12,5 +12,6 @@ paperServer {
     version.set("1.21.7")
     jvmArgs.set("-Xms2G -Xmx4G")
     serverDir.set("development-server")
+    preLaunchTasks.set(listOf("build"))
 }
 ```

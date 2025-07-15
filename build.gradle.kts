@@ -2,10 +2,11 @@ plugins {
     `kotlin-dsl`
     `java-gradle-plugin`
     id("com.gradle.plugin-publish") version "1.3.1"
+    `maven-publish`
 }
 
 group = "io.github.gateopenerz"
-version = "1.0.0"
+version = "1.0.1"
 
 repositories {
     mavenCentral()
