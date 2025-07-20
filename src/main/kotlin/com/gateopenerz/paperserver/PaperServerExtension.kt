@@ -11,4 +11,7 @@ abstract class PaperServerExtension @Inject constructor(objects: ObjectFactory) 
     abstract val jvmArgs: Property<String>
     abstract val serverDir: Property<String>
     abstract val preLaunchTasks: ListProperty<String>
+    abstract val plugins: ListProperty<String>
+    abstract val pluginUrls: ListProperty<String>
+    abstract val interactiveConsole: Property<Boolean>
 }
