@@ -6,7 +6,7 @@ plugins {
 }
 
 group = "io.github.gateopenerz"
-version = "1.0.2"
+version = "1.1.0"
 
 repositories {
     mavenCentral()
@@ -19,14 +19,13 @@ dependencies {
 gradlePlugin {
     website.set("https://github.com/gateopenerz/paper-setup-plugin")
     vcsUrl.set("https://github.com/gateopenerz/paper-setup-plugin.git")
-
     plugins {
         create("paperSetupServer") {
             id = "io.github.gateopenerz.paper-server"
             implementationClass = "com.gateopenerz.paperserver.PaperServerPlugin"
-            displayName = "Paper Setup Server helper plugin"
-            description = "Downloads & runs PaperMC with configurable jvm arguments and hooks"
-            tags.set(listOf("minecraft", "paper", "server"))
+            displayName = "Multi-Server Setup Plugin"
+            description = "Downloads & runs Paper, Purpur, Velocity, Folia, and Advanced Slime Paper with configurable jvm arguments and hooks"
+            tags.set(listOf("minecraft", "paper", "purpur", "velocity", "folia", "advanced-slime-paper", "server"))
         }
     }
 }
